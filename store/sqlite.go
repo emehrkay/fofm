@@ -91,7 +91,7 @@ func (s *SQLite) LastRun() (*migration.Migration, error) {
 	err := s.db.QueryRow(query).Scan(fields...)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ResultError{OriginalError: err}
+			return nil, NoResultsError{OriginalError: err}
 		}
 
 		return nil, err
@@ -136,7 +136,7 @@ func (s *SQLite) LastStatusRun(status string) (*migration.Migration, error) {
 	err := s.db.QueryRow(query, status).Scan(fields...)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ResultError{OriginalError: err}
+			return nil, NoResultsError{OriginalError: err}
 		}
 
 		return nil, err
@@ -180,7 +180,7 @@ func (s *SQLite) LastRunByName(name string) (*migration.Migration, error) {
 	err := s.db.QueryRow(query, name).Scan(fields...)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ResultError{OriginalError: err}
+			return nil, NoResultsError{OriginalError: err}
 		}
 
 		return nil, err

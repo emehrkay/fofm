@@ -1,7 +1,6 @@
 package fofm
 
 import (
-	"database/sql"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -176,18 +175,16 @@ func (m *FOFM) Run(name string) error {
 func (m *FOFM) Latest() error {
 	lastRun, err := m.DB.LastRun()
 	if err != nil {
-		if _, ok := err.(store.ResultError); !ok {
+		if _, ok := err.(store.NoResultsError); !ok {
 			return err
 		}
 	}
 
 	// if the last run failed, we will get the previous successful run
 	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
-		// TODO: log
-
 		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
 		if err != nil {
-			if _, ok := err.(store.ResultError); !ok {
+			if _, ok := err.(store.NoResultsError); !ok {
 				return err
 			}
 		}
@@ -207,16 +204,18 @@ func (m *FOFM) Latest() error {
 func (m *FOFM) Down(name string) error {
 	lastRun, err := m.DB.LastRun()
 	if err != nil {
-		return err
+		if _, ok := err.(store.NoResultsError); !ok {
+			return err
+		}
 	}
 
 	// if the last run failed, we will get the previous successful run
 	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
-		// TODO: log
-
 		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
-		if err != nil && err != sql.ErrNoRows {
-			return err
+		if err != nil {
+			if _, ok := err.(store.NoResultsError); !ok {
+				return err
+			}
 		}
 	}
 

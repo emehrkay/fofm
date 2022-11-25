@@ -4,12 +4,12 @@ import (
 	"github.com/emehrkay/fofm/migration"
 )
 
-type ResultError struct {
+type NoResultsError struct {
 	_             struct{}
 	OriginalError error
 }
 
-func (re ResultError) Error() string {
+func (re NoResultsError) Error() string {
 	return re.OriginalError.Error()
 }
 
