@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -67,7 +68,7 @@ func (s *SQLite) CreateStore() error {
 	return err
 }
 
-func (s *SQLite) LastRun() (migration.Migration, error) {
+func (s *SQLite) LastRun() (*migration.Migration, error) {
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -77,12 +78,39 @@ func (s *SQLite) LastRun() (migration.Migration, error) {
 		id DESC
 	LIMIT 1`, selectFields, s.tablename)
 	mig := migration.Migration{}
-	err := s.db.QueryRow(query).Scan(mig.Scan()...)
+	var timestamp, created string
+	fields := []any{
+		&mig.ID,
+		&mig.Name,
+		&mig.Direction,
+		&mig.Status,
+		&mig.Error,
+		&timestamp,
+		&created,
+	}
+	err := s.db.QueryRow(query).Scan(fields...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ResultError{OriginalError: err}
+		}
 
-	return mig, err
+		return nil, err
+	}
+
+	err = mig.CreatedFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	err = mig.TimestampFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mig, nil
 }
 
-func (s *SQLite) LastStatusRun(status string) (migration.Migration, error) {
+func (s *SQLite) LastStatusRun(status string) (*migration.Migration, error) {
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -94,9 +122,81 @@ func (s *SQLite) LastStatusRun(status string) (migration.Migration, error) {
 		id DESC
 	LIMIT 1`, selectFields, s.tablename)
 	mig := migration.Migration{}
-	err := s.db.QueryRow(query, status).Scan(mig.Scan()...)
+	var timestamp, created string
+	fields := []any{
+		&mig.ID,
+		&mig.Name,
+		&mig.Direction,
+		&mig.Status,
+		&mig.Error,
+		&timestamp,
+		&created,
+	}
 
-	return mig, err
+	err := s.db.QueryRow(query, status).Scan(fields...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ResultError{OriginalError: err}
+		}
+
+		return nil, err
+	}
+
+	err = mig.CreatedFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	err = mig.TimestampFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mig, err
+}
+
+func (s *SQLite) LastRunByName(name string) (*migration.Migration, error) {
+	query := fmt.Sprintf(`
+	SELECT
+		%s
+	FROM
+		%s
+	WHERE
+		name = $1
+	ORDER BY
+		id DESC
+	LIMIT 1`, selectFields, s.tablename)
+	mig := migration.Migration{}
+	var timestamp, created string
+	fields := []any{
+		&mig.ID,
+		&mig.Name,
+		&mig.Direction,
+		&mig.Status,
+		&mig.Error,
+		&timestamp,
+		&created,
+	}
+	err := s.db.QueryRow(query, name).Scan(fields...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ResultError{OriginalError: err}
+		}
+
+		return nil, err
+	}
+
+	err = mig.CreatedFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	err = mig.TimestampFromString(created)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mig, err
 }
 
 func (s *SQLite) List() ([]migration.Migration, error) {
@@ -119,8 +219,28 @@ func (s *SQLite) List() ([]migration.Migration, error) {
 
 	for rows.Next() {
 		mig := migration.Migration{}
-		err = rows.Scan(mig.Scan()...)
+		var timestamp, created string
+		fields := []any{
+			&mig.ID,
+			&mig.Name,
+			&mig.Direction,
+			&mig.Status,
+			&mig.Error,
+			&timestamp,
+			&created,
+		}
+		err = rows.Scan(fields...)
 
+		if err != nil {
+			return migs, err
+		}
+
+		err = mig.CreatedFromString(created)
+		if err != nil {
+			return migs, err
+		}
+
+		err = mig.TimestampFromString(created)
 		if err != nil {
 			return migs, err
 		}
@@ -136,9 +256,15 @@ func (s *SQLite) Save(current migration.Migration, err error) error {
 	INSERT INTO
 		%s (name, direction, status, error, timestamp, created)
 	VALUES
-		($1, $2, $3, $4, $5, NOW()`, s.tablename)
+		($1, $2, $3, $4, $5, $6)`, s.tablename)
 
-	_, err = s.db.Exec(query, current.Name, current.Direction, current.Status, err.Error(), current.Timestamp)
+	var errText string
+	if err != nil {
+		errText = err.Error()
+	}
+
+	now := time.Now().UTC().Format(time.RFC1123Z)
+	_, err = s.db.Exec(query, current.Name, current.Direction, current.Status, errText, current.Timestamp, now)
 
 	return err
 }

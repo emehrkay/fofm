@@ -3,7 +3,6 @@ package fofm
 import (
 	"database/sql"
 	"fmt"
-	"io"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -108,16 +107,16 @@ func (m *FOFM) GetNextMigrationTemplate() (string, int64) {
 	sName := m.migrationStuctName
 	template := fmt.Sprintf(`package %s
 	
-	func (i %s) Migration_%v_up() error {
-		// up migration here
-		return nil
-	}
-	
-	func (i %s) Migration_%v_down() error {
-		// down migration here
-		return nil
-	}
-	`, m.Migration.GetPackageName(), sName, now, sName, now)
+func (i %s) Migration_%v_up() error {
+	// up migration here
+	return nil
+}
+
+func (i %s) Migration_%v_down() error {
+	// down migration here
+	return nil
+}
+`, m.Migration.GetPackageName(), sName, now, sName, now)
 
 	return template, now
 }
@@ -136,11 +135,6 @@ func (m *FOFM) CreateMigration() (string, error) {
 	return fullPath, nil
 }
 
-func (m *FOFM) SaveTemplate(contents []byte, writer io.Writer) error {
-
-	return nil
-}
-
 func (m *FOFM) Status() []migration.Migration {
 	migrations := []migration.Migration{}
 
@@ -152,8 +146,17 @@ func (m *FOFM) Run(name string) error {
 		return nil
 	}
 
+	// ensure that the latest migration with the name arg
+	// was not successful
+	latest, err := m.DB.LastRunByName(name)
+	if err == nil && latest != nil {
+		if latest.Status == STATUS_SUCCESS {
+			return fmt.Errorf(`migration "%s" latest run was successful. will not run again`, name)
+		}
+	}
+
 	ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
-	err, _ := ret[0].Interface().(error)
+	err, _ = ret[0].Interface().(error)
 	mig := migration.Migration{
 		Name:   name,
 		Status: STATUS_SUCCESS,
@@ -167,28 +170,30 @@ func (m *FOFM) Run(name string) error {
 		return err
 	}
 
-	m.DB.Save(mig, nil)
-
-	return nil
+	return m.DB.Save(mig, nil)
 }
 
 func (m *FOFM) Latest() error {
 	lastRun, err := m.DB.LastRun()
-	if err != nil && err != sql.ErrNoRows {
-		return err
-	}
-
-	// if the last run failed, we will get the previous successful run
-	if lastRun.Status == STATUS_FAILURE {
-		// TODO: log
-
-		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
-		if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if _, ok := err.(store.ResultError); !ok {
 			return err
 		}
 	}
 
-	toRun := m.UpMigrations.After(&lastRun)
+	// if the last run failed, we will get the previous successful run
+	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
+		// TODO: log
+
+		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
+		if err != nil {
+			if _, ok := err.(store.ResultError); !ok {
+				return err
+			}
+		}
+	}
+
+	toRun := m.UpMigrations.After(lastRun)
 	for _, mig := range toRun {
 		err := m.Run(mig.Name)
 		if err != nil {
@@ -206,7 +211,7 @@ func (m *FOFM) Down(name string) error {
 	}
 
 	// if the last run failed, we will get the previous successful run
-	if lastRun.Status == STATUS_FAILURE {
+	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
 		// TODO: log
 
 		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
@@ -215,7 +220,7 @@ func (m *FOFM) Down(name string) error {
 		}
 	}
 
-	toRun := m.DownMigrations.After(&lastRun)
+	toRun := m.DownMigrations.After(lastRun)
 	for _, mig := range toRun {
 		err := m.Run(mig.Name)
 		if err != nil {

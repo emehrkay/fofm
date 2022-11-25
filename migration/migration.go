@@ -2,6 +2,7 @@ package migration
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,26 @@ func (m *Migration) Scan() []any {
 		&m.Timestamp,
 		&m.Created,
 	}
+}
+
+func (m *Migration) TimestampFromString(timeStr string) error {
+	if strings.TrimSpace(timeStr) == "" {
+		return nil
+	}
+
+	var err error
+	m.Timestamp, err = time.Parse(time.RFC1123Z, timeStr)
+	return err
+}
+
+func (m *Migration) CreatedFromString(timeStr string) error {
+	if strings.TrimSpace(timeStr) == "" {
+		return nil
+	}
+
+	var err error
+	m.Created, err = time.Parse(time.RFC1123Z, timeStr)
+	return err
 }
 
 type MigrationStack []Migration
@@ -53,9 +74,17 @@ func (m MigrationStack) Reverse() {
 }
 
 func (m MigrationStack) After(after *Migration) MigrationStack {
+	if after == nil {
+		return m
+	}
+
 	var i int
 	var mig Migration
 	stack := MigrationStack{}
+
+	if len(m) == 0 {
+		return stack
+	}
 
 	if after != nil {
 		for i, mig = range m {
@@ -63,6 +92,8 @@ func (m MigrationStack) After(after *Migration) MigrationStack {
 				break
 			}
 		}
+
+		i += 1
 	}
 
 	stack = append(stack, m[:i]...)

@@ -4,6 +4,15 @@ import (
 	"github.com/emehrkay/fofm/migration"
 )
 
+type ResultError struct {
+	_             struct{}
+	OriginalError error
+}
+
+func (re ResultError) Error() string {
+	return re.OriginalError.Error()
+}
+
 type Store interface {
 	// Connect will connect to the store
 	// it is automatcically called by FOFM
@@ -20,9 +29,11 @@ type Store interface {
 	Clear() error
 
 	// LastRun will return the last run migration
-	LastRun() (migration.Migration, error)
+	LastRun() (*migration.Migration, error)
 
-	LastStatusRun(status string) (migration.Migration, error)
+	LastStatusRun(status string) (*migration.Migration, error)
+
+	LastRunByName(name string) (*migration.Migration, error)
 
 	// List will return a list of all migrations that
 	// have been saved to the store

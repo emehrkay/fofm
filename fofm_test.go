@@ -11,12 +11,17 @@ import (
 	"github.com/emehrkay/fofm/store"
 )
 
-func TestNew(t *testing.T) {
+func getDB(t *testing.T) store.Store {
 	db, err := store.NewSQLite(":memory:")
 	if err != nil {
 		t.Errorf(`unable to make db -- %v`, err)
 	}
 
+	return db
+}
+
+func TestNew(t *testing.T) {
+	db := getDB(t)
 	tm := TestMigrationManager{}
 	mig, err := fofm.New(db, tm)
 	if err != nil {
@@ -73,10 +78,7 @@ func TestNewShouldOrderMigrations(t *testing.T) {
 }
 
 func TestCreateMigrationTemplate(t *testing.T) {
-	db, err := store.NewSQLite(":memory:")
-	if err != nil {
-		t.Errorf(`unable to make db -- %v`, err)
-	}
+	db := getDB(t)
 
 	// overwrite the writer for testing
 	var newMigration string
@@ -122,12 +124,233 @@ func TestCreateMigrationTemplate(t *testing.T) {
 	}
 }
 
-func TestRunUpMigration(t *testing.T) {
+func TestRunLatestUpMigration(t *testing.T) {
+	db := getDB(t)
 
+	tm := TestMigrationManager{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	ranMig := false
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		ranMig = true
+		return nil
+	}
+
+	err = mig.Latest()
+	if !ranMig {
+		t.Errorf(`unable to run up migration`)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
+
+	list, err := mig.DB.List()
+	if err != nil || len(list) != 1 {
+		t.Errorf(`the number of migrations in the list is incorrect. expected 1 got %v`, len(list))
+	}
+}
+
+func TestRunLatestUpMigrationOnceWhenCalledMultipleTimes(t *testing.T) {
+	db := getDB(t)
+
+	tm := TestMigrationManager{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	first := "first"
+	ranMig := ""
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		ranMig = first
+		return nil
+	}
+
+	err = mig.Latest()
+	if ranMig != first {
+		t.Errorf(`unable to run up migration`)
+	}
+
+	second := "second"
+	MigrationUpFunc = func() error {
+		ranMig = second
+		return nil
+	}
+
+	err = mig.Latest()
+	if ranMig != first {
+		t.Errorf(`test ran the second Latest() call`)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
+}
+
+func TestRunLatestUpMigrationAndAllBeforeIt(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	ranMig := false
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		ranMig = true
+		return nil
+	}
+
+	ranMig10 := false
+	MigrationUpFuncOrig10 := MigrationUpFunc10
+	MigrationUpFunc10 = func() error {
+		ranMig10 = true
+		return nil
+	}
+
+	ranMig18 := false
+	MigrationUpFuncOrig18 := MigrationUpFunc18
+	MigrationUpFunc18 = func() error {
+		ranMig18 = true
+		return nil
+	}
+
+	err = mig.Latest()
+	if !ranMig || !ranMig10 || !ranMig18 {
+		t.Errorf(`unable to run up migration`)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
+	MigrationUpFunc10 = MigrationUpFuncOrig10
+	MigrationUpFunc18 = MigrationUpFuncOrig18
+}
+
+func TestShouldNotRerunUpMigrationIfLastStatusWasSuccess(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManager{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	ranMig := false
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		ranMig = true
+		return nil
+	}
+
+	err = mig.Latest()
+	if !ranMig || err != nil {
+		t.Errorf(`unable to run up migration`)
+	}
+
+	err = mig.Run("Migration_1_up")
+	if err == nil {
+		t.Errorf("expected not to rerun migration")
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
+}
+
+func TestRunFailedUpMigration(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManager{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		return fmt.Errorf("some failure")
+	}
+
+	err = mig.Latest()
+	if err == nil {
+		t.Errorf(`the migration should've returned an error`)
+	}
+
+	list, err := mig.DB.List()
+	if err != nil {
+		t.Errorf(`unable to list migrations -- %v`, err)
+	}
+
+	if len(list) != 1 {
+		t.Errorf(`unexpected number of migrations (%v) should be 1`, len(list))
+	}
+
+	if list[0].Status != fofm.STATUS_FAILURE {
+		t.Errorf(`expected %v but got %v`, fofm.STATUS_FAILURE, list[0].Status)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
 }
 
 func TestReRunFailedUpMigration(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManager{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
 
+	var migRan bool
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		return fmt.Errorf("some failure")
+	}
+
+	err = mig.Latest()
+	if err == nil {
+		t.Errorf(`the migration should've returned an error`)
+	}
+
+	list, err := mig.DB.List()
+	if err != nil {
+		t.Errorf(`unable to list migrations -- %v`, err)
+	}
+
+	if len(list) != 1 {
+		t.Errorf(`unexpected number of migrations (%v) should be 1`, len(list))
+	}
+
+	if list[0].Status != fofm.STATUS_FAILURE {
+		t.Errorf(`expected %v but got %v`, fofm.STATUS_FAILURE, list[0].Status)
+	}
+
+	// fix the migration
+	MigrationUpFunc = func() error {
+		migRan = true
+		return nil
+	}
+
+	err = mig.Latest()
+	if err != nil {
+		t.Errorf(`unable to rerun migration -- %v`, err)
+	}
+
+	if migRan != true {
+		t.Errorf(`the migration did not rerun`)
+	}
+
+	list, err = mig.DB.List()
+	if err != nil {
+		t.Errorf(`unable to list migrations -- %v`, err)
+	}
+
+	if len(list) != 2 {
+		t.Errorf(`unexpected number of migrations (%v) should be 2`, len(list))
+	}
+
+	if list[1].Status != fofm.STATUS_SUCCESS {
+		t.Errorf(`expected %v but got %v`, fofm.STATUS_SUCCESS, list[1].Status)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
 }
 
 func TestRunDownMigration(t *testing.T) {
