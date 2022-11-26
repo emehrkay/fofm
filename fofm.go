@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -18,10 +19,28 @@ const (
 )
 
 type FunctionalMigration interface {
+	// GetMigrationsPath this should return the directory where your migration
+	// manager lives. This path is used when new migration files are created
 	GetMigrationsPath() string
+
+	// GetPackageName should return the name of the package where your migration
+	// manager lives. This is sued when migration files are created
 	GetPackageName() string
 }
 
+// BaseMigration provides an embed struct to easily adhere to the FunctionalMigration interface
+type BaseMigration struct{}
+
+func (b BaseMigration) GetMigrationsPath() string {
+	// get the path of the file where this is called from
+	_, curFile, _, _ := runtime.Caller(1)
+	parts := strings.Split(curFile, "/")
+
+	return strings.Join(parts[0:len(parts)-1], "/")
+}
+
+// New will creae a new instance of FOFM. It will apply the DefaultSettings which
+// can be overwritten by passing in settings
 func New(db Store, migrationInstance FunctionalMigration, settings ...Setting) (*FOFM, error) {
 	manager := &FOFM{
 		DB:                 db,
@@ -98,6 +117,7 @@ func (f *FOFM) init() error {
 	return nil
 }
 
+// GetNextMigrationTemplate will return a migration template and its unix time
 func (m *FOFM) GetNextMigrationTemplate() (string, int64) {
 	now := time.Now().Unix()
 	sName := m.migrationStuctName
@@ -117,6 +137,8 @@ func (i %s) Migration_%v_down() error {
 	return template, now
 }
 
+// CreateMigration will create a new migration template based on the current unix time
+// and it will call the defined Writer (which is a file writer by default)
 func (m *FOFM) CreateMigration() (string, error) {
 	template, now := m.GetNextMigrationTemplate()
 	fileName := fmt.Sprintf(`migration_%v.go`, now)
@@ -131,6 +153,8 @@ func (m *FOFM) CreateMigration() (string, error) {
 	return fullPath, nil
 }
 
+// Status returns a list of all migrations and all of the times when they've been run
+// since migrations can be run mulitple times
 func (m *FOFM) Status() (MigrationSetStatus, error) {
 	status := MigrationSetStatus{}
 
@@ -179,6 +203,10 @@ func (m *FOFM) run(names ...string) error {
 	return nil
 }
 
+// Latest will run all up migrations between the last migration that was run and the
+// latest defined migration. If the last migration was a failure, it will attempt to rerun it
+// if the last run migration is the latest and it was successful, it will return an error. If that
+// migration was a failure, it will attempt to rerun it
 func (m *FOFM) Latest() error {
 	lastRun, err := m.DB.LastRun()
 	if err != nil {
@@ -220,6 +248,7 @@ func (m *FOFM) Latest() error {
 	return m.run(toRun.Names()...)
 }
 
+// UP will run all migrations, in order, up to and inclduing the named one passed in
 func (m *FOFM) Up(name string) error {
 	// ensure that the latest migration with the name arg
 	// was not successful
@@ -235,11 +264,15 @@ func (m *FOFM) Up(name string) error {
 	return m.run(toRun.Names()...)
 }
 
+// Down will run all migrations, in reverse order, up to and including the named one
+// passed in
 func (m *FOFM) Down(name string) error {
 	toRun := m.DownMigrations.BeforeName(name)
 
 	return m.run(toRun.Names()...)
 }
+
+// utility funcs
 
 func MigrationNameParts(name string) (timestamp time.Time, direction string, err error) {
 	parts := strings.Split(name, "_")

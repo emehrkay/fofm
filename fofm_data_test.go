@@ -1,12 +1,11 @@
 package fofm_test
 
+import "github.com/emehrkay/fofm"
+
 var TestPKGNAME = "test_pkg_name"
 
 type TestMigrationManager struct {
-}
-
-func (t TestMigrationManager) GetMigrationsPath() string {
-	return ""
+	fofm.BaseMigration
 }
 
 func (t TestMigrationManager) GetPackageName() string {
@@ -46,10 +45,7 @@ func (i TestMigrationManager) Migration_1_down() error {
 }
 
 type TestMigrationManagerMultiple struct {
-}
-
-func (t TestMigrationManagerMultiple) GetMigrationsPath() string {
-	return ""
+	fofm.BaseMigration
 }
 
 func (t TestMigrationManagerMultiple) GetPackageName() string {
