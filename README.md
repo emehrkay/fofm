@@ -12,13 +12,18 @@ package some_package
 import "github.com/emehrkay/fofm"
 
 type MyMigrationsManager struct {
-	fofm.BaseMigration
-
     NeededResource *SomeLibrary
 }
 
 func (m MyMigrationsManager) GetPackageName() string {
 	return "some_package"
+}
+
+func (m MyMigrationsManager) GetMigrationsPath() string {
+	_, curFile, _, _ := runtime.Caller(0)
+	parts := strings.Split(curFile, "/")
+
+	return strings.Join(parts[0:len(parts)-1], "/")
 }
 ```
 

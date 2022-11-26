@@ -1,15 +1,24 @@
 package fofm_test
 
-import "github.com/emehrkay/fofm"
+import (
+	"runtime"
+	"strings"
+)
 
 var TestPKGNAME = "test_pkg_name"
 
 type TestMigrationManager struct {
-	fofm.BaseMigration
 }
 
 func (t TestMigrationManager) GetPackageName() string {
 	return TestPKGNAME
+}
+
+func (t TestMigrationManager) GetMigrationsPath() string {
+	_, curFile, _, _ := runtime.Caller(0)
+	parts := strings.Split(curFile, "/")
+
+	return strings.Join(parts[0:len(parts)-1], "/")
 }
 
 var MigrationUpFunc = func() error {
@@ -45,11 +54,17 @@ func (i TestMigrationManager) Migration_1_down() error {
 }
 
 type TestMigrationManagerMultiple struct {
-	fofm.BaseMigration
 }
 
 func (t TestMigrationManagerMultiple) GetPackageName() string {
 	return TestPKGNAME
+}
+
+func (t TestMigrationManagerMultiple) GetMigrationsPath() string {
+	_, curFile, _, _ := runtime.Caller(0)
+	parts := strings.Split(curFile, "/")
+
+	return strings.Join(parts[0:len(parts)-1], "/")
 }
 
 func (i TestMigrationManagerMultiple) Migration_1_up() error {

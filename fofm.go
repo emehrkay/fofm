@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -26,17 +25,6 @@ type FunctionalMigration interface {
 	// GetPackageName should return the name of the package where your migration
 	// manager lives. This is sued when migration files are created
 	GetPackageName() string
-}
-
-// BaseMigration provides an embed struct to easily adhere to the FunctionalMigration interface
-type BaseMigration struct{}
-
-func (b BaseMigration) GetMigrationsPath() string {
-	// get the path of the file where this is called from
-	_, curFile, _, _ := runtime.Caller(1)
-	parts := strings.Split(curFile, "/")
-
-	return strings.Join(parts[0:len(parts)-1], "/")
 }
 
 // New will creae a new instance of FOFM. It will apply the DefaultSettings which
