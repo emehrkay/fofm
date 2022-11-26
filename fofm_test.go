@@ -1,6 +1,7 @@
 package fofm_test
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -8,11 +9,10 @@ import (
 	"time"
 
 	"github.com/emehrkay/fofm"
-	"github.com/emehrkay/fofm/store"
 )
 
-func getDB(t *testing.T) store.Store {
-	db, err := store.NewSQLite(":memory:")
+func getDB(t *testing.T) fofm.Store {
+	db, err := fofm.NewSQLite(":memory:")
 	if err != nil {
 		t.Errorf(`unable to make db -- %v`, err)
 	}
@@ -38,7 +38,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewShouldOrderMigrations(t *testing.T) {
-	db, err := store.NewSQLite(":memory:")
+	db, err := fofm.NewSQLite(":memory:")
 	if err != nil {
 		t.Errorf(`unable to make db -- %v`, err)
 	}
@@ -153,6 +153,40 @@ func TestRunLatestUpMigration(t *testing.T) {
 	}
 }
 
+func TestRunLatestUpMigrationAfterRunningEarlierMigration(t *testing.T) {
+	db := getDB(t)
+
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	ranMig := false
+	MigrationUpFuncOrig := MigrationUpFunc
+	MigrationUpFunc = func() error {
+		ranMig = true
+		return nil
+	}
+
+	err = mig.Up("Migration_1_up")
+	if err != nil {
+		t.Errorf("unable to run Migration_1_up -- %v", err)
+	}
+
+	err = mig.Latest()
+	if !ranMig {
+		t.Errorf(`unable to run up migration`)
+	}
+
+	MigrationUpFunc = MigrationUpFuncOrig
+
+	list, err := mig.DB.List()
+	if err != nil || len(list) != 4 {
+		t.Errorf(`the number of migrations in the list is incorrect. expected 4 got %v`, len(list))
+	}
+}
+
 func TestRunLatestUpMigrationOnceWhenCalledMultipleTimes(t *testing.T) {
 	db := getDB(t)
 
@@ -182,7 +216,7 @@ func TestRunLatestUpMigrationOnceWhenCalledMultipleTimes(t *testing.T) {
 	}
 
 	err = mig.Latest()
-	if ranMig != first {
+	if err == nil || ranMig != first {
 		t.Errorf(`test ran the second Latest() call`)
 	}
 
@@ -248,7 +282,7 @@ func TestShouldNotRerunUpMigrationIfLastStatusWasSuccess(t *testing.T) {
 		t.Errorf(`unable to run up migration`)
 	}
 
-	err = mig.Run("Migration_1_up")
+	err = mig.Up("Migration_1_up")
 	if err == nil {
 		t.Errorf("expected not to rerun migration")
 	}
@@ -306,7 +340,7 @@ func TestReRunFailedUpMigration(t *testing.T) {
 
 	err = mig.Latest()
 	if err == nil {
-		t.Errorf(`the migration should've returned an error`)
+		t.Errorf(`the migration should've returned an error -- %v`, err)
 	}
 
 	list, err := mig.DB.List()
@@ -354,13 +388,123 @@ func TestReRunFailedUpMigration(t *testing.T) {
 }
 
 func TestRunDownMigration(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
 
+	// run a migration
+	err = mig.Up("Migration_18_up")
+	if err != nil {
+		t.Errorf("unable to run migration -- %s", err)
+	}
+
+	migDown := false
+	MigrationDownFuncOrig := MigrationDownFunc
+	MigrationDownFunc = func() error {
+		migDown = true
+		return nil
+	}
+
+	err = mig.Down("Migration_1_down")
+	if err != nil {
+		t.Errorf("unable to run migration -- %s", err)
+	}
+
+	if !migDown {
+		t.Error("unable to migrate down")
+	}
+
+	// check the store
+	entries, err := mig.DB.GetAllByName("Migration_1_down")
+	if err != nil {
+		t.Errorf("unable to get Migration_1_down from store -- %s", err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("incorrect number of Migration_1_down entires in the store, should be 1 got %v", len(entries))
+	}
+
+	MigrationDownFunc = MigrationDownFuncOrig
 }
 
 func TestReRunFailedDownMigration(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	// run a migration
+	err = mig.Up("Migration_18_up")
+	if err != nil {
+		t.Errorf("unable to run migration -- %s", err)
+	}
+
+	MigrationDownFuncOrig := MigrationDownFunc
+	MigrationDownFunc = func() error {
+		return errors.New("some migration error")
+	}
+
+	err = mig.Down("Migration_1_down")
+	if err == nil {
+		t.Errorf("the migration shouldve failed")
+	}
+
+	// fix the migration
+	migDown := false
+	MigrationDownFunc = func() error {
+		migDown = true
+		return nil
+	}
+
+	err = mig.Down("Migration_1_down")
+	if err != nil {
+		t.Errorf("the migration shouldve passed -- %v", err)
+	}
+
+	if !migDown {
+		t.Error("unable to migrate down")
+	}
+
+	MigrationDownFunc = MigrationDownFuncOrig
 
 }
 
-func TestListMigrations(t *testing.T) {
+func TestMigrationStatus(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
 
+	// run a migration
+	run := "Migration_15_up"
+	err = mig.Up(run)
+	if err != nil {
+		t.Errorf("unable to run migration -- %s", err)
+	}
+
+	status, err := mig.Status()
+	if err != nil {
+		t.Errorf("unable to build status -- %s", err)
+	}
+
+	if len(status.Migrations) != len(mig.UpMigrations) {
+		t.Errorf("incorrect status entries. got %v but wanted %v", len(status.Migrations), len(mig.UpMigrations))
+	}
+
+	// ensure that the migrations that have run, have run times
+	unRun := "Migration_18_up"
+	for _, mig := range status.Migrations {
+		if mig.Migration.Name != unRun {
+			if len(mig.Runs) == 0 {
+				t.Errorf("expectd %v to have previously run", mig.Migration.Name)
+			}
+		}
+	}
 }

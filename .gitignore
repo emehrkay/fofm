@@ -16,3 +16,4 @@ vendor/
 testing/
 
 .vscode/
+cover.html

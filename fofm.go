@@ -7,17 +7,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/emehrkay/fofm/migration"
-	"github.com/emehrkay/fofm/store"
 )
 
 const (
 	up               = "up"
 	down             = "down"
 	migration_prefix = "Migration"
-	STATUS_SUCCESS   = "failure"
-	STATUS_FAILURE   = "success"
+	STATUS_SUCCESS   = "success"
+	STATUS_FAILURE   = "failure"
 )
 
 type FunctionalMigration interface {
@@ -25,12 +22,12 @@ type FunctionalMigration interface {
 	GetPackageName() string
 }
 
-func New(db store.Store, migrationInstance FunctionalMigration, settings ...Setting) (*FOFM, error) {
+func New(db Store, migrationInstance FunctionalMigration, settings ...Setting) (*FOFM, error) {
 	manager := &FOFM{
 		DB:                 db,
 		Migration:          migrationInstance,
-		UpMigrations:       migration.MigrationStack{},
-		DownMigrations:     migration.MigrationStack{},
+		UpMigrations:       MigrationStack{},
+		DownMigrations:     MigrationStack{},
 		migrationStuctName: reflect.TypeOf(migrationInstance).Name(),
 	}
 
@@ -53,10 +50,10 @@ func New(db store.Store, migrationInstance FunctionalMigration, settings ...Sett
 
 type FOFM struct {
 	_                  struct{}
-	DB                 store.Store
+	DB                 Store
 	Migration          FunctionalMigration
-	UpMigrations       migration.MigrationStack
-	DownMigrations     migration.MigrationStack
+	UpMigrations       MigrationStack
+	DownMigrations     MigrationStack
 	migrationStuctName string
 	Seeded             bool
 	Writer             WriteFile
@@ -134,17 +131,96 @@ func (m *FOFM) CreateMigration() (string, error) {
 	return fullPath, nil
 }
 
-func (m *FOFM) Status() []migration.Migration {
-	migrations := []migration.Migration{}
+func (m *FOFM) Status() (MigrationSetStatus, error) {
+	status := MigrationSetStatus{}
 
-	return migrations
-}
+	for _, mig := range m.UpMigrations {
+		all, err := m.DB.GetAllByName(mig.Name)
+		if err != nil {
+			return status, err
+		}
 
-func (m *FOFM) Run(name string) error {
-	if strings.TrimSpace(name) == "" {
-		return nil
+		status.Migrations = append(status.Migrations, Status{
+			Migration: mig,
+			Runs:      all.ToRuns(),
+		})
 	}
 
+	return status, nil
+}
+
+func (m *FOFM) run(names ...string) error {
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return nil
+		}
+
+		ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
+		err, _ := ret[0].Interface().(error)
+		mig := Migration{
+			Name:   name,
+			Status: STATUS_SUCCESS,
+		}
+
+		if err != nil {
+			err := fmt.Errorf(`error running: %v -- %v`, name, err)
+			mig.Status = STATUS_FAILURE
+			m.DB.Save(mig, err)
+
+			return err
+		}
+
+		err = m.DB.Save(mig, nil)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *FOFM) Latest() error {
+	lastRun, err := m.DB.LastRun()
+	if err != nil {
+		if _, ok := err.(NoResultsError); !ok {
+			return err
+		}
+	}
+
+	if lastRun != nil {
+		switch lastRun.Status {
+		case STATUS_SUCCESS:
+			// do not run anything if the lastRun is actually the latest migration
+			if last := m.UpMigrations.Last(); last != nil {
+				if lastRun.Name == last.Name {
+					return fmt.Errorf(`the latest migraion: %v has been successfully run`, last.Name)
+				}
+			}
+
+			// the last run should be the next one after the successful run
+			after := m.UpMigrations.After(lastRun)
+			if len(after) > 1 {
+				lastRun = &after[1]
+			} else {
+				lastRun = nil
+			}
+
+		case STATUS_FAILURE:
+			lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
+			if err != nil {
+				if _, ok := err.(NoResultsError); !ok {
+					return err
+				}
+			}
+		}
+	}
+
+	toRun := m.UpMigrations.After(lastRun)
+
+	return m.run(toRun.Names()...)
+}
+
+func (m *FOFM) Up(name string) error {
 	// ensure that the latest migration with the name arg
 	// was not successful
 	latest, err := m.DB.LastRunByName(name)
@@ -154,80 +230,15 @@ func (m *FOFM) Run(name string) error {
 		}
 	}
 
-	ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
-	err, _ = ret[0].Interface().(error)
-	mig := migration.Migration{
-		Name:   name,
-		Status: STATUS_SUCCESS,
-	}
+	toRun := m.UpMigrations.BeforeName(name)
 
-	if err != nil {
-		err := fmt.Errorf(`error running: %v -- %v`, name, err)
-		mig.Status = STATUS_FAILURE
-		m.DB.Save(mig, err)
-
-		return err
-	}
-
-	return m.DB.Save(mig, nil)
-}
-
-func (m *FOFM) Latest() error {
-	lastRun, err := m.DB.LastRun()
-	if err != nil {
-		if _, ok := err.(store.NoResultsError); !ok {
-			return err
-		}
-	}
-
-	// if the last run failed, we will get the previous successful run
-	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
-		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
-		if err != nil {
-			if _, ok := err.(store.NoResultsError); !ok {
-				return err
-			}
-		}
-	}
-
-	toRun := m.UpMigrations.After(lastRun)
-	for _, mig := range toRun {
-		err := m.Run(mig.Name)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return m.run(toRun.Names()...)
 }
 
 func (m *FOFM) Down(name string) error {
-	lastRun, err := m.DB.LastRun()
-	if err != nil {
-		if _, ok := err.(store.NoResultsError); !ok {
-			return err
-		}
-	}
+	toRun := m.DownMigrations.BeforeName(name)
 
-	// if the last run failed, we will get the previous successful run
-	if lastRun != nil && lastRun.Status == STATUS_FAILURE {
-		lastRun, err = m.DB.LastStatusRun(STATUS_SUCCESS)
-		if err != nil {
-			if _, ok := err.(store.NoResultsError); !ok {
-				return err
-			}
-		}
-	}
-
-	toRun := m.DownMigrations.After(lastRun)
-	for _, mig := range toRun {
-		err := m.Run(mig.Name)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return m.run(toRun.Names()...)
 }
 
 func MigrationNameParts(name string) (timestamp time.Time, direction string, err error) {

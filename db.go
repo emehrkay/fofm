@@ -1,4 +1,4 @@
-package store
+package fofm
 
 import (
 	"database/sql"
@@ -6,9 +6,55 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-
-	"github.com/emehrkay/fofm/migration"
 )
+
+type Store interface {
+	// Connect will connect to the store
+	// it is automatcically called by FOFM
+	Connect() error
+
+	// Close will close any connections related to the store
+	Close() error
+
+	// CreateStore should do the work of creating
+	// the storage for the migrations. It
+	// should be a "create if doesnt exist" type
+	// operation
+	CreateStore() error
+
+	// LastRun will return the last run migration
+	LastRun() (*Migration, error)
+
+	// LastStatusRun will get the last run with the
+	// provided status
+	LastStatusRun(status string) (*Migration, error)
+
+	// LastRunByName will get the last run with the
+	// provided name
+	LastRunByName(name string) (*Migration, error)
+
+	// GetAllByName will return all migrations with the
+	// provided name
+	GetAllByName(name string) (MigrationSet, error)
+
+	// List will return a list of all migrations that
+	// have been saved to the store
+	List() (MigrationSet, error)
+
+	// Save should insert a new record
+	Save(current Migration, err error) error
+}
+
+// NoResultsError should be used in place of a
+// store's no results error
+type NoResultsError struct {
+	_             struct{}
+	OriginalError error
+}
+
+func (re NoResultsError) Error() string {
+	return re.OriginalError.Error()
+}
 
 const (
 	functionalMigrationTableName = "function_migrations"
@@ -49,10 +95,6 @@ func (s *SQLite) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLite) Clear() error {
-	return nil
-}
-
 func (s *SQLite) CreateStore() error {
 	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 		id INTEGER PRIMARY KEY,
@@ -68,7 +110,7 @@ func (s *SQLite) CreateStore() error {
 	return err
 }
 
-func (s *SQLite) LastRun() (*migration.Migration, error) {
+func (s *SQLite) LastRun() (*Migration, error) {
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -77,7 +119,7 @@ func (s *SQLite) LastRun() (*migration.Migration, error) {
 	ORDER BY
 		id DESC
 	LIMIT 1`, selectFields, s.tablename)
-	mig := migration.Migration{}
+	mig := Migration{}
 	var timestamp, created string
 	fields := []any{
 		&mig.ID,
@@ -110,7 +152,7 @@ func (s *SQLite) LastRun() (*migration.Migration, error) {
 	return &mig, nil
 }
 
-func (s *SQLite) LastStatusRun(status string) (*migration.Migration, error) {
+func (s *SQLite) LastStatusRun(status string) (*Migration, error) {
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -121,7 +163,7 @@ func (s *SQLite) LastStatusRun(status string) (*migration.Migration, error) {
 	ORDER BY
 		id DESC
 	LIMIT 1`, selectFields, s.tablename)
-	mig := migration.Migration{}
+	mig := Migration{}
 	var timestamp, created string
 	fields := []any{
 		&mig.ID,
@@ -155,7 +197,7 @@ func (s *SQLite) LastStatusRun(status string) (*migration.Migration, error) {
 	return &mig, err
 }
 
-func (s *SQLite) LastRunByName(name string) (*migration.Migration, error) {
+func (s *SQLite) LastRunByName(name string) (*Migration, error) {
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -166,7 +208,7 @@ func (s *SQLite) LastRunByName(name string) (*migration.Migration, error) {
 	ORDER BY
 		id DESC
 	LIMIT 1`, selectFields, s.tablename)
-	mig := migration.Migration{}
+	mig := Migration{}
 	var timestamp, created string
 	fields := []any{
 		&mig.ID,
@@ -199,8 +241,8 @@ func (s *SQLite) LastRunByName(name string) (*migration.Migration, error) {
 	return &mig, err
 }
 
-func (s *SQLite) List() ([]migration.Migration, error) {
-	migs := []migration.Migration{}
+func (s *SQLite) List() (MigrationSet, error) {
+	migs := MigrationSet{}
 	query := fmt.Sprintf(`
 	SELECT
 		%s
@@ -218,7 +260,7 @@ func (s *SQLite) List() ([]migration.Migration, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		mig := migration.Migration{}
+		mig := Migration{}
 		var timestamp, created string
 		fields := []any{
 			&mig.ID,
@@ -251,7 +293,61 @@ func (s *SQLite) List() ([]migration.Migration, error) {
 	return migs, err
 }
 
-func (s *SQLite) Save(current migration.Migration, err error) error {
+func (s *SQLite) GetAllByName(name string) (MigrationSet, error) {
+	migs := MigrationSet{}
+	query := fmt.Sprintf(`
+	SELECT
+		%s
+	FROM
+		%s
+	WHERE
+		name = $1
+	ORDER BY
+		id ASC
+	`, selectFields, s.tablename)
+	rows, err := s.db.Query(query, name)
+
+	if err != nil {
+		return migs, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		mig := Migration{}
+		var timestamp, created string
+		fields := []any{
+			&mig.ID,
+			&mig.Name,
+			&mig.Direction,
+			&mig.Status,
+			&mig.Error,
+			&timestamp,
+			&created,
+		}
+		err = rows.Scan(fields...)
+
+		if err != nil {
+			return migs, err
+		}
+
+		err = mig.CreatedFromString(created)
+		if err != nil {
+			return migs, err
+		}
+
+		err = mig.TimestampFromString(created)
+		if err != nil {
+			return migs, err
+		}
+
+		migs = append(migs, mig)
+	}
+
+	return migs, err
+}
+
+func (s *SQLite) Save(current Migration, err error) error {
 	query := fmt.Sprintf(`
 	INSERT INTO
 		%s (name, direction, status, error, timestamp, created)
