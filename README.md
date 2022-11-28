@@ -62,14 +62,90 @@ Every migration is ordered based on the integer in the method name -- `Migration
 ```go
 manager.Latest() // to run all migrations in order including the latest one
 manager.Up("Migration_10_up") // to run every migration in order up to "Migration_10_up"
-manager.Down("Migration_1_down") // to run every migration in reverse order down to "Migration_1_down" 
+manager.Down("1") // to run every migration in reverse order down to "Migration_1_down" 
 ```
+
+> Both the Up and Down methods can accept the full migration name `Migration_1_up`, a partial name `Migration_1`, or just the integer `1`
 
 ### Extending
 
 As of now, `sqlite` is the only storage engine pacakged with **fofm**. Luckily, it adheres to the `Store` interface so rolling your own is pretty straight forward.
 
-**fofm** really shines when it is used as a command line tool. Simply wrap its public methods behind your defined CLI interfaces and you're good to go. 
+**fofm** really shines when it is used as a command line tool. Simply wrap its public methods behind your defined CLI interfaces and you're good to go. Here is how I used **fofm** with **cobra**
+
+```go
+
+func init() {
+	migs := myMigrationManager{}
+	migrationsLocation := env.Get("MIGRATION_LOCATION", ":memory:")
+	db, err := fofm.NewSQLite(migrationsLocation)
+	if err != nil {
+		panic(err)
+	}
+
+	manager, err := fofm.New(db, migs)
+	if err != nil {
+		panic(err)
+	}
+
+	var latest = &cobra.Command{
+		Use: "migrate_latest",
+		Run: func(cmd *cobra.Command, args []string) {
+			manager.Latest()
+		},
+	}
+
+	var create = &cobra.Command{
+		Use: "migrate_create",
+		Run: func(cmd *cobra.Command, args []string) {
+			manager.CreateMigration()
+		},
+	}
+
+	var status = &cobra.Command{
+		Use: "migrate_status",
+		Run: func(cmd *cobra.Command, args []string) {
+			migStatus, err := manager.Status()
+			if err != nil {
+				panic(err)
+			}
+
+			headers := []string{"ORDER", "MIGRATION", "STATUS", "RUNS"}
+			writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+			fmt.Fprintln(writer, strings.Join(headers, "\t"))
+
+			for i, mig := range migStatus.Migrations {
+				order := fmt.Sprintf("%v", i)
+				runs := []string{}
+
+				for _, run := range mig.Runs {
+					runs = append(runs, fmt.Sprintf(`(%s %s)`, run.Status, run.Timestamp))
+				}
+
+				var status string
+				if len(mig.Runs) == 0 {
+					status = "not run"
+					runs = append(runs, "-")
+				}
+
+				row := []string{
+					order,
+					mig.Migration.Name,
+					status,
+					strings.Join(runs, " "),
+				}
+
+				fmt.Fprintln(writer, strings.Join(row, "\t"))
+			}
+
+			writer.Flush()
+		},
+	}
+
+	RootCmd.AddCommand(latest, create, status)
+}
+
+```
 
 ### Use Cases
 
