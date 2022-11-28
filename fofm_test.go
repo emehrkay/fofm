@@ -141,6 +141,10 @@ func TestRunLatestUpMigration(t *testing.T) {
 	}
 
 	err = mig.Latest()
+	if err != nil {
+		t.Errorf("unable to run latest-- %s", err)
+	}
+
 	if !ranMig {
 		t.Errorf(`unable to run up migration`)
 	}
@@ -175,6 +179,10 @@ func TestRunLatestUpMigrationAfterRunningEarlierMigration(t *testing.T) {
 	}
 
 	err = mig.Latest()
+	if err != nil {
+		t.Errorf("unable to run latest -- %v", err)
+	}
+
 	if !ranMig {
 		t.Errorf(`unable to run up migration`)
 	}
@@ -205,6 +213,10 @@ func TestRunLatestUpMigrationOnceWhenCalledMultipleTimes(t *testing.T) {
 	}
 
 	err = mig.Latest()
+	if err != nil {
+		t.Errorf("unable to run latest -- %v", err)
+	}
+
 	if ranMig != first {
 		t.Errorf(`unable to run up migration`)
 	}
@@ -253,6 +265,10 @@ func TestRunLatestUpMigrationAndAllBeforeIt(t *testing.T) {
 	}
 
 	err = mig.Latest()
+	if err != nil {
+		t.Errorf("unable to run latest -- %v", err)
+	}
+
 	if !ranMig || !ranMig10 || !ranMig18 {
 		t.Errorf(`unable to run up migration`)
 	}
@@ -471,7 +487,39 @@ func TestReRunFailedDownMigration(t *testing.T) {
 	}
 
 	MigrationDownFunc = MigrationDownFuncOrig
+}
 
+func TestCanRunLatestMigraionsMigrateDownAndBackToLatest(t *testing.T) {
+	db := getDB(t)
+	tm := TestMigrationManagerMultiple{}
+	mig, err := fofm.New(db, tm)
+	if err != nil {
+		t.Errorf("expected New but got -- %s", err)
+	}
+
+	err = mig.Latest()
+	if err != nil {
+		t.Errorf(`unable to run latest migration -- %v`, err)
+	}
+
+	err = mig.Down("Migration_1_down")
+	if err != nil {
+		t.Errorf(`unable to migrate down -- %v`, err)
+	}
+
+	err = mig.Latest()
+	if err != nil {
+		t.Errorf(`unable to rerun latest migration -- %v`, err)
+	}
+
+	list, err := mig.DB.List()
+	if err != nil {
+		t.Errorf(`unable to get list -- %v`, err)
+	}
+
+	if len(list) != 15 {
+		t.Errorf(`expected 15 runs, but got %v`, len(list))
+	}
 }
 
 func TestMigrationStatus(t *testing.T) {

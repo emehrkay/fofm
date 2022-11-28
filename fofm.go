@@ -167,11 +167,17 @@ func (m *FOFM) run(names ...string) error {
 			return nil
 		}
 
+		_, dir, err := MigrationNameParts(name)
+		if err != nil {
+			return fmt.Errorf(`invalid migration name: %v -- %v`, name, err)
+		}
+
 		ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
-		err, _ := ret[0].Interface().(error)
+		err, _ = ret[0].Interface().(error)
 		mig := Migration{
-			Name:   name,
-			Status: STATUS_SUCCESS,
+			Name:      name,
+			Status:    STATUS_SUCCESS,
+			Direction: dir,
 		}
 
 		if err != nil {
@@ -207,18 +213,19 @@ func (m *FOFM) Latest() error {
 		switch lastRun.Status {
 		case STATUS_SUCCESS:
 			// do not run anything if the lastRun is actually the latest migration
-			if last := m.UpMigrations.Last(); last != nil {
-				if lastRun.Name == last.Name {
-					return fmt.Errorf(`the latest migraion: %v has been successfully run`, last.Name)
-				}
+			last := m.UpMigrations.Last()
+			if lastRun.Name == last.Name {
+				return fmt.Errorf(`the latest migraion: %v has been successfully run`, last.Name)
 			}
 
 			// the last run should be the next one after the successful run
-			after := m.UpMigrations.After(lastRun)
-			if len(after) > 1 {
-				lastRun = &after[1]
-			} else {
-				lastRun = nil
+			if last.Direction == lastRun.Direction {
+				after := m.UpMigrations.After(lastRun)
+				if len(after) > 1 {
+					lastRun = &after[1]
+				} else {
+					lastRun = nil
+				}
 			}
 
 		case STATUS_FAILURE:
@@ -282,7 +289,7 @@ func MigrationNameParts(name string) (timestamp time.Time, direction string, err
 	return
 }
 
-var fileTime = regexp.MustCompile("[\\d]+")
+var fileTime = regexp.MustCompile(`[\d]+`)
 
 func MigrationFileNameTime(name string) (timestamp time.Time, err error) {
 	fTime := fileTime.FindString(name)
