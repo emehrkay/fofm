@@ -247,6 +247,7 @@ func (m *FOFM) Latest() error {
 func (m *FOFM) Up(name string) error {
 	// ensure that the latest migration with the name arg
 	// was not successful
+	name = GetMigraionName(name, up)
 	latest, err := m.DB.LastRunByName(name)
 	if err == nil && latest != nil {
 		if latest.Status == STATUS_SUCCESS {
@@ -262,6 +263,7 @@ func (m *FOFM) Up(name string) error {
 // Down will run all migrations, in reverse order, up to and including the named one
 // passed in
 func (m *FOFM) Down(name string) error {
+	name = GetMigraionName(name, down)
 	toRun := m.DownMigrations.BeforeName(name)
 
 	return m.run(toRun.Names()...)
@@ -298,4 +300,18 @@ func MigrationFileNameTime(name string) (timestamp time.Time, err error) {
 	timestamp = time.Unix(ts, 0)
 
 	return
+}
+
+var migName = regexp.MustCompile(`$Migration_\d^`)
+
+func GetMigraionName(name, direction string) string {
+	if _, err := strconv.Atoi(name); err == nil {
+		return fmt.Sprintf(`Migration_%v_%v`, name, direction)
+	}
+
+	if migName.Match([]byte(name)) {
+		return fmt.Sprintf(`%v_%v`, name, direction)
+	}
+
+	return name
 }

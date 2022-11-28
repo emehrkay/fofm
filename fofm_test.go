@@ -477,7 +477,7 @@ func TestReRunFailedDownMigration(t *testing.T) {
 		return nil
 	}
 
-	err = mig.Down("Migration_1_down")
+	err = mig.Down("Migration_1")
 	if err != nil {
 		t.Errorf("the migration shouldve passed -- %v", err)
 	}
@@ -502,7 +502,7 @@ func TestCanRunLatestMigraionsMigrateDownAndBackToLatest(t *testing.T) {
 		t.Errorf(`unable to run latest migration -- %v`, err)
 	}
 
-	err = mig.Down("Migration_1_down")
+	err = mig.Down("1")
 	if err != nil {
 		t.Errorf(`unable to migrate down -- %v`, err)
 	}
@@ -531,7 +531,7 @@ func TestMigrationStatus(t *testing.T) {
 	}
 
 	// run a migration
-	run := "Migration_15_up"
+	run := "15"
 	err = mig.Up(run)
 	if err != nil {
 		t.Errorf("unable to run migration -- %s", err)
