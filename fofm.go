@@ -251,7 +251,7 @@ func (m *FOFM) Up(name string) error {
 	latest, err := m.DB.LastRunByName(name)
 	if err == nil && latest != nil {
 		if latest.Status == STATUS_SUCCESS {
-			return fmt.Errorf(`migration "%s" latest run was successful. will not run again`, name)
+			return nil
 		}
 	}
 

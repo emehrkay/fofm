@@ -287,6 +287,7 @@ func TestShouldNotRerunUpMigrationIfLastStatusWasSuccess(t *testing.T) {
 	}
 
 	ranMig := false
+	migValue := ""
 	MigrationUpFuncOrig := MigrationUpFunc
 	MigrationUpFunc = func() error {
 		ranMig = true
@@ -294,12 +295,18 @@ func TestShouldNotRerunUpMigrationIfLastStatusWasSuccess(t *testing.T) {
 	}
 
 	err = mig.Latest()
-	if !ranMig || err != nil {
+	if !ranMig || err != nil || migValue != "" {
 		t.Errorf(`unable to run up migration`)
 	}
 
+	MigrationUpFunc = func() error {
+		ranMig = true
+		migValue = "some value"
+		return nil
+	}
+
 	err = mig.Up("Migration_1_up")
-	if err == nil {
+	if err != nil || migValue != "" {
 		t.Errorf("expected not to rerun migration")
 	}
 
