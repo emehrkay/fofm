@@ -215,7 +215,7 @@ func (m *FOFM) Latest() error {
 			// do not run anything if the lastRun is actually the latest migration
 			last := m.UpMigrations.Last()
 			if lastRun.Name == last.Name {
-				return fmt.Errorf(`the latest migraion: %v has been successfully run`, last.Name)
+				return nil
 			}
 
 			// the last run should be the next one after the successful run

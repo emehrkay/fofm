@@ -228,7 +228,7 @@ func TestRunLatestUpMigrationOnceWhenCalledMultipleTimes(t *testing.T) {
 	}
 
 	err = mig.Latest()
-	if err == nil || ranMig != first {
+	if err != nil || ranMig != first {
 		t.Errorf(`test ran the second Latest() call`)
 	}
 
