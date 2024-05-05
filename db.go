@@ -22,6 +22,9 @@ type Store interface {
 	// operation
 	CreateStore() error
 
+	// ClearStore should reset the store to an empty state
+	ClearStore() error
+
 	// LastRun will return the last run migration
 	LastRun() (*Migration, error)
 
@@ -105,6 +108,14 @@ func (s *SQLite) CreateStore() error {
 		error TEXT NULL,
 		created TEXT NOT NULL
 	)`, s.tablename)
+	_, err := s.db.Exec(query)
+
+	return err
+}
+
+func (s *SQLite) ClearStore() error {
+	query := fmt.Sprintf(`
+	DELETE FROM %s`, s.tablename)
 	_, err := s.db.Exec(query)
 
 	return err

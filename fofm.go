@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,17 @@ type FunctionalMigration interface {
 	// GetPackageName should return the name of the package where your migration
 	// manager lives. This is sued when migration files are created
 	GetPackageName() string
+}
+
+// BaseMigration provides an embed struct to easily adhere to the FunctionalMigration interface
+type BaseMigration struct{}
+
+func (b BaseMigration) GetMigrationsPath() string {
+	// get the path of the file where this is called from
+	_, curFile, _, _ := runtime.Caller(1)
+	parts := strings.Split(curFile, "/")
+
+	return strings.Join(parts[0:len(parts)-1], "/")
 }
 
 // New will creae a new instance of FOFM. It will apply the DefaultSettings which
@@ -105,6 +117,10 @@ func (f *FOFM) init() error {
 	return nil
 }
 
+func (m *FOFM) ClearStore() error {
+	return m.DB.ClearStore()
+}
+
 // GetNextMigrationTemplate will return a migration template and its unix time
 func (m *FOFM) GetNextMigrationTemplate() (string, int64) {
 	now := time.Now().Unix()
@@ -167,17 +183,12 @@ func (m *FOFM) run(names ...string) error {
 			return nil
 		}
 
-		_, dir, err := MigrationNameParts(name)
-		if err != nil {
-			return fmt.Errorf(`invalid migration name: %v -- %v`, name, err)
-		}
-
 		ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
-		err, _ = ret[0].Interface().(error)
+		err, _ := ret[0].Interface().(error)
 		mig := Migration{
 			Name:      name,
 			Status:    STATUS_SUCCESS,
-			Direction: dir,
+			Timestamp: time.Now().UTC(),
 		}
 
 		if err != nil {
@@ -213,19 +224,18 @@ func (m *FOFM) Latest() error {
 		switch lastRun.Status {
 		case STATUS_SUCCESS:
 			// do not run anything if the lastRun is actually the latest migration
-			last := m.UpMigrations.Last()
-			if lastRun.Name == last.Name {
-				return nil
+			if last := m.UpMigrations.Last(); last != nil {
+				if lastRun.Name == last.Name {
+					return nil
+				}
 			}
 
 			// the last run should be the next one after the successful run
-			if last.Direction == lastRun.Direction {
-				after := m.UpMigrations.After(lastRun)
-				if len(after) > 1 {
-					lastRun = &after[1]
-				} else {
-					lastRun = nil
-				}
+			after := m.UpMigrations.After(lastRun)
+			if len(after) > 1 {
+				lastRun = &after[1]
+			} else {
+				lastRun = nil
 			}
 
 		case STATUS_FAILURE:
@@ -247,11 +257,10 @@ func (m *FOFM) Latest() error {
 func (m *FOFM) Up(name string) error {
 	// ensure that the latest migration with the name arg
 	// was not successful
-	name = GetMigraionName(name, up)
 	latest, err := m.DB.LastRunByName(name)
 	if err == nil && latest != nil {
 		if latest.Status == STATUS_SUCCESS {
-			return nil
+			return fmt.Errorf(`migration "%s" latest run was successful. will not run again`, name)
 		}
 	}
 
@@ -263,7 +272,6 @@ func (m *FOFM) Up(name string) error {
 // Down will run all migrations, in reverse order, up to and including the named one
 // passed in
 func (m *FOFM) Down(name string) error {
-	name = GetMigraionName(name, down)
 	toRun := m.DownMigrations.BeforeName(name)
 
 	return m.run(toRun.Names()...)
@@ -291,7 +299,7 @@ func MigrationNameParts(name string) (timestamp time.Time, direction string, err
 	return
 }
 
-var fileTime = regexp.MustCompile(`[\d]+`)
+var fileTime = regexp.MustCompile("[\\d]+")
 
 func MigrationFileNameTime(name string) (timestamp time.Time, err error) {
 	fTime := fileTime.FindString(name)
@@ -300,18 +308,4 @@ func MigrationFileNameTime(name string) (timestamp time.Time, err error) {
 	timestamp = time.Unix(ts, 0)
 
 	return
-}
-
-var migName = regexp.MustCompile(`$Migration_\d^`)
-
-func GetMigraionName(name, direction string) string {
-	if _, err := strconv.Atoi(name); err == nil {
-		return fmt.Sprintf(`Migration_%v_%v`, name, direction)
-	}
-
-	if migName.Match([]byte(name)) {
-		return fmt.Sprintf(`%v_%v`, name, direction)
-	}
-
-	return name
 }
