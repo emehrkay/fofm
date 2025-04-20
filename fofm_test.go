@@ -307,7 +307,7 @@ func TestShouldNotRerunUpMigrationIfLastStatusWasSuccess(t *testing.T) {
 
 	err = mig.Up("Migration_1_up")
 	if err != nil || migValue != "" {
-		t.Errorf("expected not to rerun migration")
+		t.Errorf("expected not to rerun migration -- %v", err)
 	}
 
 	MigrationUpFunc = MigrationUpFuncOrig

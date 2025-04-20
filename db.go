@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 type Store interface {
@@ -65,7 +65,7 @@ const (
 )
 
 func NewSQLiteWithTableName(filepath, tablename string) (*SQLite, error) {
-	ins, err := sql.Open("sqlite3", filepath)
+	ins, err := sql.Open("sqlite", filepath)
 	if err != nil {
 		return nil, err
 	}
