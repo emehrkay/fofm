@@ -183,12 +183,18 @@ func (m *FOFM) run(names ...string) error {
 			return nil
 		}
 
+		_, direction, err := MigrationNameParts(name)
+		if err != nil {
+			return err
+		}
+
 		ret := reflect.ValueOf(m.Migration).MethodByName(name).Call([]reflect.Value{})
-		err, _ := ret[0].Interface().(error)
+		err, _ = ret[0].Interface().(error)
 		mig := Migration{
 			Name:      name,
 			Status:    STATUS_SUCCESS,
 			Timestamp: time.Now().UTC(),
+			Direction: direction,
 		}
 
 		if err != nil {
@@ -232,7 +238,7 @@ func (m *FOFM) Latest() error {
 
 			// the last run should be the next one after the successful run
 			after := m.UpMigrations.After(lastRun)
-			if len(after) > 1 {
+			if len(after) > 1 && lastRun.Is("up") {
 				lastRun = &after[1]
 			} else {
 				lastRun = nil
@@ -260,7 +266,8 @@ func (m *FOFM) Up(name string) error {
 	latest, err := m.DB.LastRunByName(name)
 	if err == nil && latest != nil {
 		if latest.Status == STATUS_SUCCESS {
-			return fmt.Errorf(`migration "%s" latest run was successful. will not run again`, name)
+			// return fmt.Errorf(`migration "%s" latest run was successful. will not run again`, name)
+			return nil
 		}
 	}
 

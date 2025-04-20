@@ -59,6 +59,10 @@ func (m *Migration) Scan() []any {
 	}
 }
 
+func (m Migration) Is(direction string) bool {
+	return strings.ToLower(direction) == strings.ToLower(m.Direction)
+}
+
 func (m *Migration) TimestampFromString(timeStr string) error {
 	if strings.TrimSpace(timeStr) == "" {
 		return nil
@@ -164,16 +168,13 @@ func (m MigrationStack) After(after *Migration) MigrationStack {
 		return stack
 	}
 
-	if after != nil {
-		for i, mig = range m {
-			if mig.Timestamp.After(after.Timestamp) {
-				break
-			}
+	for i, mig = range m {
+		if mig.Timestamp.After(after.Timestamp) {
+			break
 		}
-
-		i += 1
 	}
 
+	i += 1
 	stack = append(stack, m[:i]...)
 
 	return stack
