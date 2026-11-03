@@ -1,7 +1,9 @@
 package fofm
 
 import (
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -59,8 +61,14 @@ func (m *Migration) Scan() []any {
 	}
 }
 
+// BaseName is the migration's name without its direction, so Migration_1_up and
+// Migration_1_down are both Migration_1. It is what ties an up to its down
+func (m Migration) BaseName() string {
+	return strings.TrimSuffix(m.Name, "_"+m.Direction)
+}
+
 func (m Migration) Is(direction string) bool {
-	return strings.ToLower(direction) == strings.ToLower(m.Direction)
+	return strings.EqualFold(direction, m.Direction)
 }
 
 func (m *Migration) TimestampFromString(timeStr string) error {
@@ -69,7 +77,7 @@ func (m *Migration) TimestampFromString(timeStr string) error {
 	}
 
 	var err error
-	m.Timestamp, err = time.Parse(time.RFC1123Z, timeStr)
+	m.Timestamp, err = parseStoredTime(timeStr)
 	return err
 }
 
@@ -79,8 +87,19 @@ func (m *Migration) CreatedFromString(timeStr string) error {
 	}
 
 	var err error
-	m.Created, err = time.Parse(time.RFC1123Z, timeStr)
+	m.Created, err = parseStoredTime(timeStr)
 	return err
+}
+
+// MigrationTime is the time that is encoded in the migration's name. It is what
+// migrations are ordered by. A migration that was read from the store has a Timestamp
+// of when it was run, which is a different thing, so the name is preferred
+func (m Migration) MigrationTime() time.Time {
+	if mTime, _, err := MigrationNameParts(m.Name); err == nil {
+		return mTime
+	}
+
+	return m.Timestamp
 }
 
 type MigrationStack []Migration
@@ -133,49 +152,102 @@ func (m MigrationStack) Reverse() {
 	})
 }
 
-func (m MigrationStack) BeforeName(name string) MigrationStack {
-	stack := MigrationStack{}
+// checkForDuplicateTimes returns an error if two migrations have the same time in their
+// names, like Migration_1_up and Migration_01_up. Their order would be a guess
+func (m MigrationStack) checkForDuplicateTimes() error {
+	seen := map[int64]string{}
 
-	if len(m) == 0 {
-		return stack
+	for _, mig := range m {
+		key := mig.Timestamp.Unix()
+		if other, ok := seen[key]; ok {
+			return fmt.Errorf(`%v and %v have the same time in their names. every migration must have its own`, other, mig.Name)
+		}
+
+		seen[key] = mig.Name
 	}
 
-	var i int
-	var mig Migration
+	return nil
+}
 
-	for i, mig = range m {
+// Find returns the migration that the name refers to or nil if there isn't one. The name
+// can be the full migration name, like Migration_1_up, the name without a direction, like
+// Migration_1, or just the integer, like 1. The integer is compared as a number, so 2 finds
+// Migration_00002_up. Direction is decided by the stack, so Migration_1_down will never
+// find anything in a stack of up migrations
+func (m MigrationStack) Find(name string) *Migration {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+
+	for i, mig := range m {
 		if mig.Name == name {
-			break
+			return &m[i]
 		}
 	}
 
-	i += 1
-	stack = m[:i]
+	number, err := strconv.ParseInt(strings.TrimPrefix(name, migration_prefix+"_"), 10, 64)
+	if err != nil {
+		return nil
+	}
 
-	return stack
+	for i, mig := range m {
+		if mig.Timestamp.Unix() == number {
+			return &m[i]
+		}
+	}
+
+	return nil
 }
 
+// BeforeName returns every migration from the start of the stack up to and including
+// the named one. It returns an empty stack when there isn't a migration with that name
+func (m MigrationStack) BeforeName(name string) MigrationStack {
+	for i, mig := range m {
+		if mig.Name == name {
+			return m[:i+1]
+		}
+	}
+
+	return MigrationStack{}
+}
+
+// After returns every migration whose time is later than the one passed in. The time
+// is read from the name of the migration that is passed in, because that is what the
+// stack is ordered by. A nil migration returns the whole stack
 func (m MigrationStack) After(after *Migration) MigrationStack {
 	if after == nil {
 		return m
 	}
 
-	var i int
-	var mig Migration
+	cutoff := after.MigrationTime()
+
+	return m.filter(func(t time.Time) bool {
+		return t.After(cutoff)
+	})
+}
+
+// From is like After, but it also includes the migration that is passed in
+func (m MigrationStack) From(from *Migration) MigrationStack {
+	if from == nil {
+		return m
+	}
+
+	cutoff := from.MigrationTime()
+
+	return m.filter(func(t time.Time) bool {
+		return !t.Before(cutoff)
+	})
+}
+
+func (m MigrationStack) filter(keep func(migrationTime time.Time) bool) MigrationStack {
 	stack := MigrationStack{}
 
-	if len(m) == 0 {
-		return stack
-	}
-
-	for i, mig = range m {
-		if mig.Timestamp.After(after.Timestamp) {
-			break
+	for _, mig := range m {
+		if keep(mig.MigrationTime()) {
+			stack = append(stack, mig)
 		}
 	}
-
-	i += 1
-	stack = append(stack, m[:i]...)
 
 	return stack
 }
