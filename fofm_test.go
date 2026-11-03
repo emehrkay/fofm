@@ -3,7 +3,6 @@ package fofm_test
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -80,19 +79,11 @@ func TestNewShouldOrderMigrations(t *testing.T) {
 func TestCreateMigrationTemplate(t *testing.T) {
 	db := getDB(t)
 
-	// overwrite the writer for testing
-	var newMigration string
-	testWriter := func(ins *fofm.FOFM) error {
-		ins.Writer = func(filename string, data []byte, perm fs.FileMode) error {
-			newMigration = string(data)
-			return nil
-		}
-
-		return nil
-	}
+	// send new migrations to memory
+	fsys, settings := newMemSettings()
 
 	tm := TestMigrationManager{}
-	mig, err := fofm.New(db, tm, testWriter)
+	mig, err := fofm.New(db, tm, settings...)
 	if err != nil {
 		t.Errorf("expected New but got -- %s", err)
 	}
@@ -101,6 +92,8 @@ func TestCreateMigrationTemplate(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected new migration from template but got -- %s", err)
 	}
+
+	newMigration := fsys.read(out)
 
 	mTime, err := fofm.MigrationFileNameTime(out)
 	if err != nil {
@@ -189,9 +182,21 @@ func TestRunLatestUpMigrationAfterRunningEarlierMigration(t *testing.T) {
 
 	MigrationUpFunc = MigrationUpFuncOrig
 
+	// Up(1) runs 1, then Latest() runs the remaining 5, 10, 15 and 18. this used to
+	// expect 4 because Latest() stopped after 10 and never ran 15 or 18
 	list, err := mig.DB.List()
-	if err != nil || len(list) != 4 {
-		t.Errorf(`the number of migrations in the list is incorrect. expected 4 got %v`, len(list))
+	if err != nil {
+		t.Fatalf(`unable to list migrations -- %v`, err)
+	}
+
+	got := []string{}
+	for _, m := range list {
+		got = append(got, m.Name)
+	}
+
+	expected := []string{"Migration_1_up", "Migration_5_up", "Migration_10_up", "Migration_15_up", "Migration_18_up"}
+	if strings.Join(got, ",") != strings.Join(expected, ",") {
+		t.Errorf("incorrect migrations ran\n got: %v\nwant: %v", got, expected)
 	}
 }
 
@@ -560,6 +565,9 @@ func TestMigrationStatus(t *testing.T) {
 			if len(mig.Runs) == 0 {
 				t.Errorf("expectd %v to have previously run", mig.Migration.Name)
 			}
+		} else if len(mig.Runs) != 0 {
+			// Up("15") used to run every migration because "15" was not matched
+			t.Errorf("expected %v not to have run", mig.Migration.Name)
 		}
 	}
 }
